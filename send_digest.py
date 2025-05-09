@@ -27,7 +27,7 @@ URL_LL = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/"
 TZ_PT = _zi.ZoneInfo("America/Los_Angeles")
 TZ_UTC = _zi.ZoneInfo("UTC")
 NOW_UTC = _dt.datetime.now(tz=TZ_UTC)
-WEEKS_AHEAD = 6  # Covers "Next 4 Weeks" and "After That"
+WEEKS_AHEAD = 16  # Covers "Next 4 Weeks" and "After That"
 START_UTC = NOW_UTC - _dt.timedelta(days=2)  # Include recent launches
 FOUR_WEEKS_UTC = NOW_UTC + _dt.timedelta(weeks=4)
 LIMIT_UTC = NOW_UTC + _dt.timedelta(weeks=WEEKS_AHEAD)
