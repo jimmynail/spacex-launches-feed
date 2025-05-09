@@ -160,7 +160,7 @@ def _spacex() -> list:
                 continue
             pad_name, locality = _get_pad_info(d["launchpad"])
             d["pad_name"] = pad_name
-            d["location"] = locality
+            d["location"] = locality.split(",")[0].strip()  # Simplify location
             if dt.date() == NOW_UTC.date():
                 logger.info(f"Included same-day launch: {d['name']} ({dt})")
             upcoming.append(d)
@@ -197,13 +197,14 @@ def _launch_library() -> list:
             name_raw = l["name"]
             rocket_part, mission_part = name_raw.split("|", 1) if "|" in name_raw else ("Falcon 9", name_raw)
             rocket_part, mission_part = rocket_part.strip(), mission_part.strip()
+            location = l.get("pad", {}).get("location", {}).get("name", "Vandenberg")
             cleaned.append({
                 "name": mission_part,
                 "rocket_name": rocket_part,
                 "date_utc": l["window_start"],
                 "slug": None,
                 "pad_name": l.get("pad", {}).get("name", "SLC-4E"),
-                "location": l.get("pad", {}).get("location", {}).get("name", "Vandenberg")
+                "location": location.split(",")[0].strip()  # Simplify location
             })
             if dt.date() == NOW_UTC.date():
                 logger.info(f"Included same-day launch: {l['name']} ({dt})")
@@ -225,12 +226,12 @@ def _render(items: list) -> tuple[str, str]:
     for d in items:
         dt, mission = _to_dt(d["date_utc"]), d["name"]
         rocket = d.get("rocket_name") or _rocket_name(d["rocket"])
-        pad_name = d.get("pad_name", "SLC-4E")
         location = d.get("location", "Vandenberg")
         time_str, tz_name = _fmt_local(dt, TZ_PT)
         sx, rl = _links(mission, rocket, d.get("slug"))
 
-        summary = f"{mission}, {rocket}, {location} {pad_name}"
+        summary = f"{mission}, {rocket}, {location}"
+        logger.info(f"Rendered summary: {summary}")
         txt_lines.append(f"🚀 {time_str} {tz_name}\n{summary}\nSpaceX: {sx}\nRocketlaunch: {rl}\n")
         html_lines.append(
             f"<li style='margin-bottom:12px;list-style:none'>"
