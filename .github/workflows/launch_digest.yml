@@ -1,26 +1,20 @@
-name: Vandenberg Launch Digest
-
+name: Send SpaceX Launch Digest
 on:
-  schedule:         # runs daily at 14:00 UTC (07:00 PDT)
-    - cron:  '0 14 * * *'
-  workflow_dispatch:   # lets you trigger it manually from the UI
-
+  schedule:
+    - cron: "0 12 * * *" # Runs daily at 12:00 UTC
+  workflow_dispatch: # Allows manual trigger
 jobs:
-  digest:
+  send-email:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v3
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
-
-      - name: Install deps
-        run: pip install requests pytz
-
-      - name: Send e-mail
+          python-version: "3.x"
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run script
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
