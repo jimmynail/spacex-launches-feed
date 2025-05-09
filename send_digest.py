@@ -28,6 +28,7 @@ TZ_PT = _zi.ZoneInfo("America/Los_Angeles")
 TZ_UTC = _zi.ZoneInfo("UTC")
 NOW_UTC = _dt.datetime.now(tz=TZ_UTC)
 WEEKS_AHEAD = 3  # Configurable time window
+START_UTC = NOW_UTC - _dt.timedelta(days=1)  # Include same-day launches
 LIMIT_UTC = NOW_UTC + _dt.timedelta(weeks=WEEKS_AHEAD)
 _ROCKETS = {}  # Cache rocket ID to name
 _PADS = {}  # Cache pad ID to name
@@ -56,8 +57,10 @@ def _pad_ids() -> list:
     try:
         pads = _rq.get(URL_PADS, timeout=10).json()
         logger.info(f"Fetched {len(pads)} launchpads")
-        vandenberg_ids = [p["[N/A]"] for p in pads if "vandenberg" in p.get("locality", "").lower()]
-        return [pid for pid in vandenberg_ids if pid in VANDENBERG_PAD_IDS]
+        vandenberg_ids = [p["id"] for p in pads if "vandenberg" in p.get("locality", "").lower()]
+        valid_ids = [pid for pid in vandenberg_ids if pid in VANDENBERG_PAD_IDS]
+        logger.info(f"Found {len(valid_ids)} Vandenberg launchpads: {valid_ids}")
+        return valid_ids
     except Exception as e:
         logger.error(f"Failed to fetch launchpads: {str(e)}")
         return VANDENBERG_PAD_IDS
@@ -136,14 +139,22 @@ def _spacex() -> list:
     """Fetch upcoming Vandenberg SpaceX launches from SpaceX API."""
     try:
         docs = _rq.post(URL_LAUNCHES, json={
-            "query": {"upcoming": True, "launchpad": {"$in": _pad_ids()}},
-            "options": {"sort": {"date_utc": "asc"},
-                        "select": ["name", "date_utc", "rocket", "slug", "launchpad"]}
+            "query": {
+                "upcoming": True,
+                "launchpad": {"$in": _pad_ids()},
+                "date_utc": {"$gte": START_UTC.isoformat(), "$lte": LIMIT_UTC.isoformat()}
+            },
+            "options": {
+                "sort": {"date_utc": "asc"},
+                "select": ["name", "date_utc", "rocket", "slug", "launchpad"]
+            }
         }, timeout=10).json()["docs"]
+        logger.info(f"Raw SpaceX API response: {len(docs)} launches")
         upcoming = []
         for d in docs:
             dt = _to_dt(d["date_utc"])
-            if not (NOW_UTC <= dt <= LIMIT_UTC):
+            if not (START_UTC <= dt <= LIMIT_UTC):
+                logger.info(f"Excluded launch outside time window: {d['name']} ({dt})")
                 continue
             if d["launchpad"] not in VANDENBERG_PAD_IDS:
                 logger.warning(f"Excluded non-Vandenberg launch: {d['name']} (Launchpad: {d['launchpad']})")
@@ -151,6 +162,8 @@ def _spacex() -> list:
             pad_name, locality = _get_pad_info(d["launchpad"])
             d["pad_name"] = pad_name
             d["location"] = locality
+            if dt.date() == NOW_UTC.date():
+                logger.info(f"Included same-day launch: {d['name']} ({dt})")
             upcoming.append(d)
         logger.info(f"Fetched {len(upcoming)} upcoming SpaceX Vandenberg launches")
         return upcoming
@@ -168,13 +181,16 @@ def _launch_library() -> list:
             "limit": 100,
             "ordering": "window_start"
         }, timeout=10).json()["results"]
+        logger.info(f"Raw TheSpaceDevs API response: {len(raw)} launches")
         cleaned = []
         for l in raw:
             dt = _to_dt(l["window_start"])
-            if not (NOW_UTC <= dt <= LIMIT_UTC):
+            if not (START_UTC <= dt <= LIMIT_UTC):
+                logger.info(f"Excluded launch outside time window: {l['name']} ({dt})")
                 continue
             pad_name = l.get("pad", {}).get("name", "").lower()
-            if "slc-4e" not in pad_name and "slc-4w" not in pad_name:
+            logger.info(f"Processing launch: {l['name']} (Raw pad name: {pad_name})")
+            if not _re.search(r"slc-?4[eEwW]", pad_name, _re.IGNORECASE):
                 logger.warning(f"Excluded non-Vandenberg launch: {l['name']} (Pad: {pad_name})")
                 continue
             name_raw = l["name"]
@@ -188,6 +204,8 @@ def _launch_library() -> list:
                 "pad_name": l.get("pad", {}).get("name", "SLC-4E"),
                 "location": l.get("pad", {}).get("location", {}).get("name", "Vandenberg")
             })
+            if dt.date() == NOW_UTC.date():
+                logger.info(f"Included same-day launch: {l['name']} ({dt})")
         logger.info(f"Fetched {len(cleaned)} upcoming TheSpaceDevs Vandenberg launches")
         return cleaned
     except Exception as e:
