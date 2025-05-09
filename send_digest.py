@@ -4,27 +4,35 @@
 import datetime, os, requests, zoneinfo, smtplib, ssl
 from email.message import EmailMessage
 
-PAD_SLC4E = "5e9e4502f5090995de566f86"          # Falcon-9 / Heavy pad id
+URL_PADS     = "https://api.spacexdata.com/v4/launchpads"
+URL_LAUNCHES = "https://api.spacexdata.com/v4/launches/query"
+ZONE_PT      = zoneinfo.ZoneInfo("America/Los_Angeles")
+NOW_UTC      = datetime.datetime.utcnow().replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+LIMIT        = NOW_UTC + datetime.timedelta(weeks=3)
+
+def vandenberg_pad_ids():
+    pads = requests.get(URL_PADS, timeout=10).json()
+    return [p["id"] for p in pads
+            if p.get("locality","").startswith("Vandenberg")]
 
 def fetch_launches():
-    end = (datetime.datetime.utcnow()+datetime.timedelta(weeks=3)
-           ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pad_ids = vandenberg_pad_ids()
     payload = {
-        "query": {"upcoming": True,
-                  "launchpad": PAD_SLC4E,
-                  "date_utc": {"$lte": end}},
-        "options": {"sort": {"date_utc": "asc"},
-                    "select": ["name", "date_utc", "window"]}
+        "query": {
+            "upcoming": True,
+            "launchpad": {"$in": pad_ids}
+        },
+        "options": {
+            "sort": {"date_utc": "asc"},
+            "select": ["name", "date_utc", "date_precision"]
+        }
     }
-    r = requests.post("https://api.spacexdata.com/v4/launches/query",
-                      json=payload, timeout=10)
-    r.raise_for_status()
-    return r.json()["docs"]
-
-def to_local(dt_utc):
-    return (dt_utc.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
-            .astimezone(zoneinfo.ZoneInfo("America/Los_Angeles")))
-
+    docs = requests.post(URL_LAUNCHES, json=payload, timeout=10).json()["docs"]
+    # keep only launches ≤ 21 days out
+    return [d for d in docs
+            if datetime.datetime.fromisoformat(d["date_utc"][:-1]).replace(
+                   tzinfo=zoneinfo.ZoneInfo("UTC")) <= LIMIT]
+    
 def format_body(docs):
     if not docs:
         return ("No Vandenberg launches currently scheduled in the next "
