@@ -27,8 +27,9 @@ URL_LL = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/"
 TZ_PT = _zi.ZoneInfo("America/Los_Angeles")
 TZ_UTC = _zi.ZoneInfo("UTC")
 NOW_UTC = _dt.datetime.now(tz=TZ_UTC)
-WEEKS_AHEAD = 3  # Configurable time window
+WEEKS_AHEAD = 6  # Extended to cover "Next 4 Weeks" and "After That"
 START_UTC = NOW_UTC - _dt.timedelta(days=2)  # Include recent launches
+FOUR_WEEKS_UTC = NOW_UTC + _dt.timedelta(weeks=4)
 LIMIT_UTC = NOW_UTC + _dt.timedelta(weeks=WEEKS_AHEAD)
 _ROCKETS = {}  # Cache rocket ID to name
 _PADS = {}  # Cache pad ID to name
@@ -216,31 +217,79 @@ def _launch_library() -> list:
 
 # ───── Email Rendering ─────
 def _render(items: list) -> tuple[str, str]:
-    """Render text and HTML email bodies."""
+    """Render text and HTML email bodies with sections."""
     if not items:
         msg = f"No Vandenberg launches currently scheduled in the next {WEEKS_AHEAD} weeks."
         logger.info("No launches found, using fallback message")
         return msg, f"<p>{msg}</p>"
 
-    txt_lines, html_lines = [], ["<ul style='padding-left:0'>"]
-    for d in items:
-        dt, mission = _to_dt(d["date_utc"]), d["name"]
-        rocket = d.get("rocket_name") or _rocket_name(d["rocket"])
-        location = d.get("location", "Vandenberg")
-        time_str, tz_name = _fmt_local(dt, TZ_PT)
-        sx, rl = _links(mission, rocket, d.get("slug"))
+    # Split launches into two sections
+    next_4_weeks = [d for d in items if _to_dt(d["date_utc"]) <= FOUR_WEEKS_UTC]
+    after_that = [d for d in items if _to_dt(d["date_utc"]) > FOUR_WEEKS_UTC]
 
-        summary = f"{mission}, {rocket}, {location}"
-        logger.info(f"Rendered summary: {summary}")
-        txt_lines.append(f"🚀 {time_str} {tz_name}\n{summary}\nSpaceX: {sx}\nRocketlaunch: {rl}\n")
-        html_lines.append(
-            f"<li style='margin-bottom:12px;list-style:none'>"
-            f"🚀 <strong>{time_str} {tz_name}</strong><br>{summary}<br>"
-            f"<a href='{sx}'>SpaceX</a> "
-            f"<a href='{rl}'>Rocketlaunch</a></li>"
-        )
+    txt_lines, html_lines = [], ["<ul style='padding-left:0'>"]
+    
+    # Next 4 Weeks Section
+    if next_4_weeks:
+        txt_lines.append("**Next 4 Weeks**")
+        html_lines.append("<h3>Next 4 Weeks</h3>")
+        for d in next_4_weeks:
+            dt, mission = _to_dt(d["date_utc"]), d["name"]
+            rocket = d.get("rocket_name") or _rocket_name(d["rocket"])
+            location = d.get("location", "Vandenberg")
+            time_str, tz_name = _fmt_local(dt, TZ_PT)
+            sx, rl = _links(mission, rocket, d.get("slug"))
+
+            # Highlight weekend/evening launches (Fri/Sat/Sun before 10:00pm)
+            loc_dt = dt.astimezone(TZ_PT)
+            is_highlight = loc_dt.weekday() in [4, 5, 6] and loc_dt.hour < 22
+            time_line = f"**🚀 {time_str} {tz_name}**" if is_highlight else f"🚀 {time_str} {tz_name}"
+            html_time = (
+                f"<span style='color: red;'><strong>{time_str} {tz_name}</strong></span>"
+                if is_highlight else f"<strong>{time_str} {tz_name}</strong>"
+            )
+
+            summary = f"{mission}, {rocket}, {location}"
+            logger.info(f"Rendered summary: {summary} (Highlight: {is_highlight})")
+            txt_lines.append(f"{time_line}\n{summary}\nSpaceX: {sx}\nRocketlaunch: {rl}\n")
+            html_lines.append(
+                f"<li style='margin-bottom:12px;list-style:none'>"
+                f"{html_time}<br>{summary}<br>"
+                f"<a href='{sx}'>SpaceX</a> "
+                f"<a href='{rl}'>Rocketlaunch</a></li>"
+            )
+
+    # After That Section
+    if after_that:
+        txt_lines.append("**After That**")
+        html_lines.append("<h3>After That</h3>")
+        for d in after_that:
+            dt, mission = _to_dt(d["date_utc"]), d["name"]
+            rocket = d.get("rocket_name") or _rocket_name(d["rocket"])
+            location = d.get("location", "Vandenberg")
+            time_str, tz_name = _fmt_local(dt, TZ_PT)
+            sx, rl = _links(mission, rocket, d.get("slug"))
+
+            loc_dt = dt.astimezone(TZ_PT)
+            is_highlight = loc_dt.weekday() in [4, 5, 6] and loc_dt.hour < 22
+            time_line = f"**🚀 {time_str} {tz_name}**" if is_highlight else f"🚀 {time_str} {tz_name}"
+            html_time = (
+                f"<span style='color: red;'><strong>{time_str} {tz_name}</strong></span>"
+                if is_highlight else f"<strong>{time_str} {tz_name}</strong>"
+            )
+
+            summary = f"{mission}, {rocket}, {location}"
+            logger.info(f"Rendered summary: {summary} (Highlight: {is_highlight})")
+            txt_lines.append(f"{time_line}\n{summary}\nSpaceX: {sx}\nRocketlaunch: {rl}\n")
+            html_lines.append(
+                f"<li style='margin-bottom:12px;list-style:none'>"
+                f"{html_time}<br>{summary}<br>"
+                f"<a href='{sx}'>SpaceX</a> "
+                f"<a href='{rl}'>Rocketlaunch</a></li>"
+            )
+
     html_lines.append("</ul>")
-    logger.info(f"Rendered email content for {len(items)} launches")
+    logger.info(f"Rendered email content for {len(items)} launches ({len(next_4_weeks)} in Next 4 Weeks, {len(after_that)} in After That)")
     return "\n".join(txt_lines), "\n".join(html_lines)
 
 # ───── Email Sending ─────
