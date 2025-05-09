@@ -27,9 +27,11 @@ URL_LL = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/"
 TZ_PT = _zi.ZoneInfo("America/Los_Angeles")
 TZ_UTC = _zi.ZoneInfo("UTC")
 NOW_UTC = _dt.datetime.now(tz=TZ_UTC)
-WEEKS_AHEAD = 3  # Configurable time window for upcoming launches
+WEEKS_AHEAD = 3  # Configurable time window
 LIMIT_UTC = NOW_UTC + _dt.timedelta(weeks=WEEKS_AHEAD)
 _ROCKETS = {}  # Cache rocket ID to name
+_PADS = {}  # Cache pad ID to name
+VANDENBERG_PAD_IDS = ["5e9e4502f509092b78566f87"]  # SLC-4E (SpaceX API)
 
 # ───── Helper Functions ─────
 def _slug(s: str) -> str:
@@ -42,20 +44,38 @@ def _to_dt(iso: str) -> _dt.datetime:
     """Convert ISO date string to UTC datetime."""
     return _dt.datetime.fromisoformat(iso.rstrip("Z")).replace(tzinfo=TZ_UTC)
 
-def _fmt_local(dt: _dt.datetime) -> str:
-    """Format datetime in Pacific Time."""
-    loc = dt.astimezone(TZ_PT)
-    return f"{loc.strftime('%b')} {loc.day} {loc.strftime('%A')} {loc.strftime('%-I:%M%p').lower()} Pacific"
+def _fmt_local(dt: _dt.datetime, tz: _zi.ZoneInfo) -> tuple[str, str]:
+    """Format datetime in local time zone, return time string and tz name."""
+    loc = dt.astimezone(tz)
+    time_str = f"{loc.strftime('%b')} {loc.day} {loc.strftime('%A')} {loc.strftime('%-I:%M%p').lower()}"
+    tz_name = tz.tzname(loc) or "Pacific"
+    return time_str, tz_name
 
 def _pad_ids() -> list:
     """Get IDs of Vandenberg launchpads."""
     try:
         pads = _rq.get(URL_PADS, timeout=10).json()
         logger.info(f"Fetched {len(pads)} launchpads")
-        return [p["id"] for p in pads if "vandenberg" in p.get("locality", "").lower()]
+        vandenberg_ids = [p["[N/A]"] for p in pads if "vandenberg" in p.get("locality", "").lower()]
+        return [pid for pid in vandenberg_ids if pid in VANDENBERG_PAD_IDS]
     except Exception as e:
         logger.error(f"Failed to fetch launchpads: {str(e)}")
-        return []
+        return VANDENBERG_PAD_IDS
+
+def _get_pad_info(pad_id: str) -> tuple[str, str]:
+    """Get launchpad name and locality."""
+    if pad_id in _PADS:
+        return _PADS[pad_id]
+    try:
+        pad = _rq.get(f"{URL_PADS}/{pad_id}", timeout=5).json()
+        name = pad.get("name", "Unknown")
+        locality = pad.get("locality", "Unknown")
+        _PADS[pad_id] = (name, locality)
+        logger.info(f"Cached pad {pad_id}: {name}, {locality}")
+        return name, locality
+    except Exception as e:
+        logger.error(f"Failed to fetch pad {pad_id}: {str(e)}")
+        return "Unknown", "Unknown"
 
 def _rocket_name(rid: str) -> str:
     """Get rocket name by ID, caching results."""
@@ -94,7 +114,6 @@ def _validate_url(url: str) -> bool:
 
 def _links(mission: str, rocket: str, slug: str | None) -> tuple[str, str]:
     """Generate SpaceX and RocketLaunch.org URLs."""
-    # SpaceX URL: Handle Starlink missions separately
     if "starlink" in mission.lower():
         match = _re.search(r"(\d+-\d+)", mission)
         sx_slug = f"sl-{match.group(1)}" if match else (slug or _slug(mission))
@@ -103,7 +122,6 @@ def _links(mission: str, rocket: str, slug: str | None) -> tuple[str, str]:
     sx = f"https://www.spacex.com/launches/mission/?missionId={sx_slug}"
     logger.info(f"Generated SpaceX URL for '{mission}': {sx}")
 
-    # RocketLaunch.org URL
     rl_rocket_slug = _rocket_slug(rocket)
     rl_mission_slug = _slug(mission)
     rl = f"https://rocketlaunch.org/mission-{rl_rocket_slug}-{rl_mission_slug}"
@@ -120,10 +138,21 @@ def _spacex() -> list:
         docs = _rq.post(URL_LAUNCHES, json={
             "query": {"upcoming": True, "launchpad": {"$in": _pad_ids()}},
             "options": {"sort": {"date_utc": "asc"},
-                        "select": ["name", "date_utc", "rocket", "slug"]}
+                        "select": ["name", "date_utc", "rocket", "slug", "launchpad"]}
         }, timeout=10).json()["docs"]
-        upcoming = [d for d in docs if NOW_UTC <= _to_dt(d["date_utc"]) <= LIMIT_UTC]
-        logger.info(f"Fetched {len(upcoming)} upcoming SpaceX launches")
+        upcoming = []
+        for d in docs:
+            dt = _to_dt(d["date_utc"])
+            if not (NOW_UTC <= dt <= LIMIT_UTC):
+                continue
+            if d["launchpad"] not in VANDENBERG_PAD_IDS:
+                logger.warning(f"Excluded non-Vandenberg launch: {d['name']} (Launchpad: {d['launchpad']})")
+                continue
+            pad_name, locality = _get_pad_info(d["launchpad"])
+            d["pad_name"] = pad_name
+            d["location"] = locality
+            upcoming.append(d)
+        logger.info(f"Fetched {len(upcoming)} upcoming SpaceX Vandenberg launches")
         return upcoming
     except Exception as e:
         logger.error(f"SpaceX API fetch failed: {str(e)}")
@@ -134,15 +163,19 @@ def _launch_library() -> list:
     try:
         raw = _rq.get(URL_LL, params={
             "lsp__name": "SpaceX",
-            "location__name__icontains": "Vandenberg",
-            "status": 1,  # Confirmed launches
+            "pad__name__icontains": "SLC-4",
+            "status": 1,
             "limit": 100,
             "ordering": "window_start"
         }, timeout=10).json()["results"]
         cleaned = []
         for l in raw:
             dt = _to_dt(l["window_start"])
-            if not NOW_UTC <= dt <= LIMIT_UTC:
+            if not (NOW_UTC <= dt <= LIMIT_UTC):
+                continue
+            pad_name = l.get("pad", {}).get("name", "").lower()
+            if "slc-4e" not in pad_name and "slc-4w" not in pad_name:
+                logger.warning(f"Excluded non-Vandenberg launch: {l['name']} (Pad: {pad_name})")
                 continue
             name_raw = l["name"]
             rocket_part, mission_part = name_raw.split("|", 1) if "|" in name_raw else ("Falcon 9", name_raw)
@@ -151,9 +184,11 @@ def _launch_library() -> list:
                 "name": mission_part,
                 "rocket_name": rocket_part,
                 "date_utc": l["window_start"],
-                "slug": None
+                "slug": None,
+                "pad_name": l.get("pad", {}).get("name", "SLC-4E"),
+                "location": l.get("pad", {}).get("location", {}).get("name", "Vandenberg")
             })
-        logger.info(f"Fetched {len(cleaned)} upcoming TheSpaceDevs launches")
+        logger.info(f"Fetched {len(cleaned)} upcoming TheSpaceDevs Vandenberg launches")
         return cleaned
     except Exception as e:
         logger.error(f"TheSpaceDevs API fetch failed: {str(e)}")
@@ -163,7 +198,7 @@ def _launch_library() -> list:
 def _render(items: list) -> tuple[str, str]:
     """Render text and HTML email bodies."""
     if not items:
-        msg = "No Vandenberg launches currently scheduled in the next three weeks."
+        msg = f"No Vandenberg launches currently scheduled in the next {WEEKS_AHEAD} weeks."
         logger.info("No launches found, using fallback message")
         return msg, f"<p>{msg}</p>"
 
@@ -171,14 +206,16 @@ def _render(items: list) -> tuple[str, str]:
     for d in items:
         dt, mission = _to_dt(d["date_utc"]), d["name"]
         rocket = d.get("rocket_name") or _rocket_name(d["rocket"])
-        when = _fmt_local(dt)
+        pad_name = d.get("pad_name", "SLC-4E")
+        location = d.get("location", "Vandenberg")
+        time_str, tz_name = _fmt_local(dt, TZ_PT)
         sx, rl = _links(mission, rocket, d.get("slug"))
 
-        summary = f"{mission}, {rocket}, Vandenberg"
-        txt_lines.append(f"🚀 {when}\n{summary}\nSpaceX: {sx}\nRocketlaunch: {rl}\n")
+        summary = f"{mission}, {rocket}, {location} {pad_name}"
+        txt_lines.append(f"🚀 {time_str} {tz_name}\n{summary}\nSpaceX: {sx}\nRocketlaunch: {rl}\n")
         html_lines.append(
             f"<li style='margin-bottom:12px;list-style:none'>"
-            f"🚀 <strong>{when}</strong><br>{summary}<br>"
+            f"🚀 <strong>{time_str} {tz_name}</strong><br>{summary}<br>"
             f"<a href='{sx}'>SpaceX</a> "
             f"<a href='{rl}'>Rocketlaunch</a></li>"
         )
