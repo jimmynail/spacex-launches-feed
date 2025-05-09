@@ -34,6 +34,9 @@ LIMIT_UTC = NOW_UTC + _dt.timedelta(weeks=WEEKS_AHEAD)
 _ROCKETS = {}  # Cache rocket ID to name
 _PADS = {}  # Cache pad ID to name
 VANDENBERG_PAD_IDS = ["5e9e4502f509092b78566f87"]  # SLC-4E (SpaceX API)
+REPO_URL = "https://github.com/jimmynail/spacex-launches-feed"
+SCRIPT_URL = f"{REPO_URL}/blob/main/send_digest.py"
+WORKFLOW_URL = f"{REPO_URL}/actions/workflows/send_digest.yml"
 
 # ───── Helper Functions ─────
 def _slug(s: str) -> str:
@@ -232,11 +235,23 @@ def _launch_library() -> list:
 
 # ───── Email Rendering ─────
 def _render(items: list) -> tuple[str, str]:
-    """Render text and HTML email bodies with sections."""
+    """Render text and HTML email bodies with sections and footer."""
     if not items:
         msg = f"No Vandenberg launches currently scheduled in the next {WEEKS_AHEAD} weeks."
         logger.info("No launches found, using fallback message")
-        return msg, f"<p>{msg}</p>"
+        footer_txt = (
+            f"\n---\n"
+            f"This email lists upcoming SpaceX launches from Vandenberg SFB within a {WEEKS_AHEAD}-week window.\n"
+            f"Edit the look-forward window: {SCRIPT_URL}. Disable these emails: {WORKFLOW_URL}"
+        )
+        footer_html = (
+            f"<p style='font-size: 10px; color: #999;'>"
+            f"This email lists upcoming SpaceX launches from Vandenberg SFB within a {WEEKS_AHEAD}-week window.<br>"
+            f"<a href='{SCRIPT_URL}'>Edit</a> the look-forward window or <a href='{WORKFLOW_URL}'>disable</a> these emails."
+            f"</p>"
+        )
+        logger.info(f"Rendered footer: This email lists upcoming SpaceX launches...")
+        return msg + footer_txt, f"<p>{msg}</p>{footer_html}"
 
     next_4_weeks = [d for d in items if _to_dt(d["date_utc"]) <= FOUR_WEEKS_UTC]
     after_that = [d for d in items if _to_dt(d["date_utc"]) > FOUR_WEEKS_UTC]
@@ -301,7 +316,22 @@ def _render(items: list) -> tuple[str, str]:
                 f"<a href='{rl}'>Rocketlaunch</a></li>"
             )
 
-    html_lines.append("</ul>")
+    # Footer
+    footer_txt = (
+        f"\n---\n"
+        f"This email lists upcoming SpaceX launches from Vandenberg SFB within a {WEEKS_AHEAD}-week window.\n"
+        f"Edit the look-forward window: {SCRIPT_URL}. Disable these emails: {WORKFLOW_URL}"
+    )
+    footer_html = (
+        f"<p style='font-size: 10px; color: #999;'>"
+        f"This email lists upcoming SpaceX launches from Vandenberg SFB within a {WEEKS_AHEAD}-week window.<br>"
+        f"Edit the look-forward window: <a href='{SCRIPT_URL}'>script</a>. Disable these emails: <a href='{WORKFLOW_URL}'>GitHub Actions</a>"
+        f"</p>"
+    )
+    logger.info(f"Rendered footer: This email lists upcoming SpaceX launches...")
+
+    txt_lines.append(footer_txt)
+    html_lines.append(footer_html)
     logger.info(f"Rendered email content for {len(items)} launches ({len(next_4_weeks)} in Next 4 Weeks, {len(after_that)} in After That)")
     return "\n".join(txt_lines), "\n".join(html_lines)
 
