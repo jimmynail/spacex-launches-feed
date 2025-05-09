@@ -28,7 +28,7 @@ TZ_PT = _zi.ZoneInfo("America/Los_Angeles")
 TZ_UTC = _zi.ZoneInfo("UTC")
 NOW_UTC = _dt.datetime.now(tz=TZ_UTC)
 WEEKS_AHEAD = 3  # Configurable time window
-START_UTC = NOW_UTC - _dt.timedelta(days=1)  # Include same-day launches
+START_UTC = NOW_UTC - _dt.timedelta(days=2)  # Include recent launches
 LIMIT_UTC = NOW_UTC + _dt.timedelta(weeks=WEEKS_AHEAD)
 _ROCKETS = {}  # Cache rocket ID to name
 _PADS = {}  # Cache pad ID to name
@@ -140,7 +140,6 @@ def _spacex() -> list:
     try:
         docs = _rq.post(URL_LAUNCHES, json={
             "query": {
-                "upcoming": True,
                 "launchpad": {"$in": _pad_ids()},
                 "date_utc": {"$gte": START_UTC.isoformat(), "$lte": LIMIT_UTC.isoformat()}
             },
@@ -190,7 +189,9 @@ def _launch_library() -> list:
                 continue
             pad_name = l.get("pad", {}).get("name", "").lower()
             logger.info(f"Processing launch: {l['name']} (Raw pad name: {pad_name})")
-            if not _re.search(r"slc-?4[eEwW]", pad_name, _re.IGNORECASE):
+            pad_match = _re.search(r"slc-?4[eE]", pad_name, _re.IGNORECASE) or "4e" in pad_name or "4w" in pad_name
+            logger.info(f"Pad match result: {pad_match} for pad_name: {pad_name}")
+            if not pad_match:
                 logger.warning(f"Excluded non-Vandenberg launch: {l['name']} (Pad: {pad_name})")
                 continue
             name_raw = l["name"]
