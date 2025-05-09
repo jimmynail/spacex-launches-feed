@@ -320,12 +320,13 @@ def _render(items: list) -> tuple[str, str]:
     footer_txt = (
         f"\n---\n"
         f"This email lists upcoming SpaceX launches from Vandenberg SFB within a {WEEKS_AHEAD}-week window.\n"
-        f"Edit the look-forward window: {SCRIPT_URL}. Disable these emails: {WORKFLOW_URL}"
+        f"Edit the look-forward window: {SCRIPT_URL}\n"
+        f"Disable these emails: {WORKFLOW_URL}\n"
     )
     footer_html = (
         f"<p style='font-size: 10px; color: #999;'>"
         f"This email lists upcoming SpaceX launches from Vandenberg SFB within a {WEEKS_AHEAD}-week window.<br>"
-        f"Edit the look-forward window: <a href='{SCRIPT_URL}'>script</a>. Disable these emails: <a href='{WORKFLOW_URL}'>GitHub Actions</a>"
+        f"<a href='{SCRIPT_URL}'>Edit</a> the look-forward window or <a href='{WORKFLOW_URL}'>disable</a> these emails."
         f"</p>"
     )
     logger.info(f"Rendered footer: This email lists upcoming SpaceX launches...")
