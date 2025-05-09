@@ -27,7 +27,7 @@ URL_LL = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/"
 TZ_PT = _zi.ZoneInfo("America/Los_Angeles")
 TZ_UTC = _zi.ZoneInfo("UTC")
 NOW_UTC = _dt.datetime.now(tz=TZ_UTC)
-WEEKS_AHEAD = 10  # Extended to cover "Next 4 Weeks" and "After That"
+WEEKS_AHEAD = 6  # Covers "Next 4 Weeks" and "After That"
 START_UTC = NOW_UTC - _dt.timedelta(days=2)  # Include recent launches
 FOUR_WEEKS_UTC = NOW_UTC + _dt.timedelta(weeks=4)
 LIMIT_UTC = NOW_UTC + _dt.timedelta(weeks=WEEKS_AHEAD)
@@ -86,7 +86,7 @@ def _rocket_name(rid: str) -> str:
     if rid in _ROCKETS:
         return _ROCKETS[rid]
     try:
-        name = _rq.get(f"{URL_ROCKETS}{rid}", timeout=10).json()["name"]
+        name = _rq.get(f"{URL_ROCKETS}/{rid}", timeout=10).json()["name"]
         _ROCKETS[rid] = name
         logger.info(f"Cached rocket ID {rid}: {name}")
         return name
@@ -139,6 +139,7 @@ def _links(mission: str, rocket: str, slug: str | None) -> tuple[str, str]:
 def _spacex() -> list:
     """Fetch upcoming Vandenberg SpaceX launches from SpaceX API."""
     try:
+        # Primary query with Vandenberg filter
         docs = _rq.post(URL_LAUNCHES, json={
             "query": {
                 "launchpad": {"$in": _pad_ids()},
@@ -149,7 +150,22 @@ def _spacex() -> list:
                 "select": ["name", "date_utc", "rocket", "slug", "launchpad"]
             }
         }, timeout=10).json()["docs"]
-        logger.info(f"Raw SpaceX API response: {len(docs)} launches")
+        logger.info(f"Raw SpaceX API response (Vandenberg filter): {len(docs)} launches: {[d['name'] for d in docs]}")
+        
+        # Fallback query if no launches
+        if not docs:
+            logger.info("No launches with Vandenberg filter, trying broader query")
+            docs = _rq.post(URL_LAUNCHES, json={
+                "query": {
+                    "date_utc": {"$gte": START_UTC.isoformat(), "$lte": LIMIT_UTC.isoformat()}
+                },
+                "options": {
+                    "sort": {"date_utc": "asc"},
+                    "select": ["name", "date_utc", "rocket", "slug", "launchpad"]
+                }
+            }, timeout=10).json()["docs"]
+            logger.info(f"Raw SpaceX API response (broad query): {len(docs)} launches: {[d['name'] for d in docs]}")
+
         upcoming = []
         for d in docs:
             dt = _to_dt(d["date_utc"])
@@ -161,7 +177,7 @@ def _spacex() -> list:
                 continue
             pad_name, locality = _get_pad_info(d["launchpad"])
             d["pad_name"] = pad_name
-            d["location"] = locality.split(",")[0].strip()  # Simplify location
+            d["location"] = locality.split(",")[0].strip()
             if dt.date() == NOW_UTC.date():
                 logger.info(f"Included same-day launch: {d['name']} ({dt})")
             upcoming.append(d)
@@ -177,11 +193,10 @@ def _launch_library() -> list:
         raw = _rq.get(URL_LL, params={
             "lsp__name": "SpaceX",
             "pad__name__icontains": "SLC-4",
-            "status": 1,
             "limit": 100,
             "ordering": "window_start"
         }, timeout=10).json()["results"]
-        logger.info(f"Raw TheSpaceDevs API response: {len(raw)} launches")
+        logger.info(f"Raw TheSpaceDevs API response: {len(raw)} launches: {[l['name'] for l in raw]}")
         cleaned = []
         for l in raw:
             dt = _to_dt(l["window_start"])
@@ -205,7 +220,7 @@ def _launch_library() -> list:
                 "date_utc": l["window_start"],
                 "slug": None,
                 "pad_name": l.get("pad", {}).get("name", "SLC-4E"),
-                "location": location.split(",")[0].strip()  # Simplify location
+                "location": location.split(",")[0].strip()
             })
             if dt.date() == NOW_UTC.date():
                 logger.info(f"Included same-day launch: {l['name']} ({dt})")
@@ -223,7 +238,6 @@ def _render(items: list) -> tuple[str, str]:
         logger.info("No launches found, using fallback message")
         return msg, f"<p>{msg}</p>"
 
-    # Split launches into two sections
     next_4_weeks = [d for d in items if _to_dt(d["date_utc"]) <= FOUR_WEEKS_UTC]
     after_that = [d for d in items if _to_dt(d["date_utc"]) > FOUR_WEEKS_UTC]
 
@@ -240,7 +254,6 @@ def _render(items: list) -> tuple[str, str]:
             time_str, tz_name = _fmt_local(dt, TZ_PT)
             sx, rl = _links(mission, rocket, d.get("slug"))
 
-            # Highlight weekend/evening launches (Fri/Sat/Sun before 10:00pm)
             loc_dt = dt.astimezone(TZ_PT)
             is_highlight = loc_dt.weekday() in [4, 5, 6] and loc_dt.hour < 22
             time_line = f"**🚀 {time_str} {tz_name}**" if is_highlight else f"🚀 {time_str} {tz_name}"
