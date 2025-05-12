@@ -270,7 +270,12 @@ def _render(items: list) -> tuple[str, str]:
             sx, rl = _links(mission, rocket, d.get("slug"))
 
             loc_dt = dt.astimezone(TZ_PT)
-            is_highlight = loc_dt.weekday() in [4, 5, 6] and loc_dt.hour < 22
+            wd, hr = loc_dt.weekday(), loc_dt.hour      # 0=Mon … 6=Sun
+            is_highlight = (
+                (wd == 4 and hr >= 13)      # Friday 1 pm or later
+                or (wd == 5)                # all of Saturday
+                or (wd == 6 and hr < 18)    # Sunday before 6 pm
+            )
             time_line = f"**🚀 {time_str} {tz_name}**" if is_highlight else f"🚀 {time_str} {tz_name}"
             html_time = (
                 f"<span style='color: red;'><strong>{time_str} {tz_name}</strong></span>"
@@ -299,7 +304,11 @@ def _render(items: list) -> tuple[str, str]:
             sx, rl = _links(mission, rocket, d.get("slug"))
 
             loc_dt = dt.astimezone(TZ_PT)
-            is_highlight = loc_dt.weekday() in [4, 5, 6] and loc_dt.hour < 22
+             is_highlight = (
+                (wd == 4 and hr >= 13)      # Friday 1 pm or later
+                or (wd == 5)                # all of Saturday
+                or (wd == 6 and hr < 18)    # Sunday before 6 pm
+            )
             time_line = f"**🚀 {time_str} {tz_name}**" if is_highlight else f"🚀 {time_str} {tz_name}"
             html_time = (
                 f"<span style='color: red;'><strong>{time_str} {tz_name}</strong></span>"
