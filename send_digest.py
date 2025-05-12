@@ -52,7 +52,7 @@ def _to_dt(iso: str) -> _dt.datetime:
 def _fmt_local(dt: _dt.datetime, tz: _zi.ZoneInfo) -> tuple[str, str]:
     """Format datetime in local time zone, return time string and tz name."""
     loc = dt.astimezone(tz)
-    time_str = f"{loc.strftime('%b')} {loc.day} {loc.strftime('%A')} {loc.strftime('%-I:%M%p').lower()}"
+    time_str = f"{loc.strftime('%A')} {loc.strftime('%b')} {loc.day} {loc.strftime('%-I:%M%p').lower()}"
     tz_name = tz.tzname(loc) or "Pacific"
     return time_str, tz_name
 
@@ -342,7 +342,7 @@ def _send(txt: str, html: str) -> None:
     m = _Email()
     m["From"] = _os.environ["SMTP_USER"]
     m["To"] = _os.environ["DEST_EMAIL"]
-    m["Subject"] = f"Upcoming Vandenberg SpaceX launches (next {WEEKS_AHEAD} weeks)"
+    m["Subject"] = f"Ad Astra! Upcoming Vandenberg SpaceX launches (next {WEEKS_AHEAD} weeks)"
     m.set_content(txt)
     m.add_alternative(html, subtype="html")
 
