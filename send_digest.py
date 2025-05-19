@@ -304,7 +304,7 @@ def _render(items: list) -> tuple[str, str]:
             sx, rl = _links(mission, rocket, d.get("slug"))
 
             loc_dt = dt.astimezone(TZ_PT)
-             is_highlight = (
+            is_highlight = (
                 (wd == 4 and hr >= 13)      # Friday 1 pm or later
                 or (wd == 5)                # all of Saturday
                 or (wd == 6 and hr < 18)    # Sunday before 6 pm
